@@ -1,16 +1,50 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "globalDependencies": ["**/.env.*local"],
+  "globalEnv": [
+    "NODE_ENV",
+    "VERCEL_ENV",
+    "VERCEL_URL"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": [".next/**", "!.next/cache/**"]
+      "outputs": [".next/**", "!.next/cache/**"],
+      "env": [
+        "NEXT_PUBLIC_*",
+        "CONVEX_DEPLOYMENT",
+        "CLERK_SECRET_KEY",
+        "CLERK_WEBHOOK_SECRET",
+        "CLERK_JWT_ISSUER_DOMAIN",
+        "CREDENTIAL_ENCRYPTION_KEY",
+        "SCHEDULER_INTERNAL_SECRET",
+        "OPENROUTER_API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GOOGLE_GENERATIVE_AI_API_KEY",
+        "RESEND_API_KEY",
+        "RESEND_WEBHOOK_SECRET",
+        "RESEND_DAILY_LIMIT",
+        "GMAIL_DAILY_LIMIT",
+        "BROWSERLESS_API_KEY",
+        "E2B_API_KEY",
+        "FIRECRAWL_API_KEY",
+        "TAVILY_API_KEY",
+        "INSTANTLY_API_KEY",
+        "STRIPE_STARTER_PRICE_ID",
+        "STRIPE_PRO_PRICE_ID",
+        "STRIPE_ENTERPRISE_PRICE_ID"
+      ]
     },
     "lint": {
       "dependsOn": ["^build"]
     },
     "type-check": {
       "dependsOn": ["^build"]
+    },
+    "test": {
+      "dependsOn": ["^build"],
+      "outputs": []
     },
     "dev": {
       "cache": false,
