@@ -81,6 +81,17 @@ const AGENT_REQUIRED_APIS: Record<string, Array<{ name: string; key: string; req
   ],
 };
 
+function isProviderConnected(providerKeys: Record<string, any> | undefined, key: string): boolean {
+  if (!providerKeys) return false;
+  const single = providerKeys[key];
+  if (single && typeof single === "object" && (single.encryptedApiKey || single.encryptedAccessToken || single.type)) {
+    return true;
+  }
+  const arr = providerKeys[`${key}_accounts`];
+  if (Array.isArray(arr) && arr.length > 0) return true;
+  return false;
+}
+
 // ── Daily cost estimator for lead gen tasks ──────────────────────────
 
 interface CostLine {
@@ -393,16 +404,18 @@ const SERVICE_OFFERINGS = [
   { group: "B2B Services", id: "signage", label: "Business Signage", pitch: "custom business signage to increase visibility and attract more walk-in customers" },
 ];
 
-const QUICK_TEST_VERTICALS = [
-  "Plumber", "HVAC Contractor", "Electrician", "Roofing Contractor", "Landscaping Company",
-  "Painting Contractor", "General Contractor", "Pest Control", "Cleaning Service", "Garage Door Company",
-];
-
-const QUICK_TEST_DATA_FIELDS = [
-  "name", "phone", "email", "website", "reviews", "ownerName", "linkedin", "metaPage",
-];
-
 const DAILY_RESULTS_TARGET_OPTIONS = [25, 50, 100, 200, 250, 300, 400, 500, 600, 700, 800, 900, 1000];
+
+const DEFAULT_EMAIL_TEMPLATE = `Hi {{ownerName}},
+
+I came across {{businessName}} and was impressed by your {{rating}}-star rating. One of your customers said: "{{bestReview}}"
+
+I help {{vertical}} businesses in {{city}} get more customers through modern websites and local SEO.
+
+Would you be open to a quick chat this week?
+
+Best,
+[Your Name]`;
 
 const DEFAULT_CAMPAIGN_CONFIG: CampaignConfig = {
   serviceOffering: "",
@@ -413,6 +426,7 @@ const DEFAULT_CAMPAIGN_CONFIG: CampaignConfig = {
   dailyResults: 250,
   dataFields: ["name", "phone", "reviews", "ownerName"],
   outreachChannels: [],
+  emailTemplate: DEFAULT_EMAIL_TEMPLATE,
   agentModels: Object.fromEntries(AGENT_ROLES.map((r) => [r.key, r.recommendedModel])),
   socialPresence: {
     findRedditGroups: false,
@@ -1390,33 +1404,6 @@ export default function ScheduledPage() {
   const deleteTask = useMutation(api.scheduledTaskRunner.deleteTask);
   const runNow = useMutation(api.scheduledTaskRunner.runNow);
   const setupLeadGenHierarchy = useMutation(api.agentTeams.setupLeadGenHierarchy);
-  const reinitializeCities = useMutation(api.cityCampaigns.reinitialize);
-
-  // Quick Test state
-  // Persist Quick Test settings in localStorage
-  const [quickTestCount, setQuickTestCount] = useState<number>(() => {
-    if (typeof window === "undefined") return 10;
-    return Number(localStorage.getItem("qt_count")) || 10;
-  });
-  const [quickTestState, setQuickTestState] = useState(() => {
-    if (typeof window === "undefined") return "Illinois";
-    return localStorage.getItem("qt_state") || "Illinois";
-  });
-  const [quickTestRunning, setQuickTestRunning] = useState(false);
-  const [quickTestVerticals, setQuickTestVerticals] = useState<string[]>(() => {
-    if (typeof window === "undefined") return [...QUICK_TEST_VERTICALS];
-    try { const s = localStorage.getItem("qt_verticals"); return s ? JSON.parse(s) : [...QUICK_TEST_VERTICALS]; } catch { return [...QUICK_TEST_VERTICALS]; }
-  });
-  const [quickTestOutreach, setQuickTestOutreach] = useState<string[]>(() => {
-    if (typeof window === "undefined") return ["email"];
-    try { const s = localStorage.getItem("qt_outreach"); return s ? JSON.parse(s) : ["email"]; } catch { return ["email"]; }
-  });
-
-  // Save to localStorage on change
-  useEffect(() => { localStorage.setItem("qt_count", String(quickTestCount)); }, [quickTestCount]);
-  useEffect(() => { localStorage.setItem("qt_state", quickTestState); }, [quickTestState]);
-  useEffect(() => { localStorage.setItem("qt_verticals", JSON.stringify(quickTestVerticals)); }, [quickTestVerticals]);
-  useEffect(() => { localStorage.setItem("qt_outreach", JSON.stringify(quickTestOutreach)); }, [quickTestOutreach]);
 
   const handleCreate = async (formData: {
     name: string;
@@ -1537,219 +1524,6 @@ export default function ScheduledPage() {
         </Button>
       </div>
 
-      {/* ── Quick Test Panel ──────────────────────────────────────────── */}
-      <div className="rounded-xl border border-border bg-card p-4 space-y-3">
-        <div className="flex items-center gap-2 text-sm font-semibold">
-          <Zap className="h-4 w-4 text-yellow-500" />
-          Quick Test
-        </div>
-
-        {/* Lead count pills */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-muted-foreground w-12">Leads:</span>
-          {[5, 10, 25, 50, 100].map((n) => (
-            <button
-              key={n}
-              onClick={() => setQuickTestCount(n)}
-              className={`px-3 py-1 text-xs rounded-full border transition-colors ${
-                quickTestCount === n
-                  ? "bg-primary text-primary-foreground border-primary"
-                  : "bg-muted/50 border-border hover:bg-muted"
-              }`}
-            >
-              {n}
-            </button>
-          ))}
-        </div>
-
-        {/* State dropdown */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground w-12">State:</span>
-          <select
-            value={quickTestState}
-            onChange={(e) => setQuickTestState(e.target.value)}
-            className="text-xs rounded-md border border-border bg-background px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-ring"
-          >
-            {US_STATES.map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </select>
-        </div>
-
-        {/* Verticals selector */}
-        <div className="flex items-start gap-2">
-          <span className="text-xs text-muted-foreground w-12 pt-1 shrink-0">Verticals:</span>
-          <div className="flex flex-wrap gap-1.5">
-            {QUICK_TEST_VERTICALS.map((v) => {
-              const selected = quickTestVerticals.includes(v);
-              return (
-                <button
-                  key={v}
-                  type="button"
-                  onClick={() => setQuickTestVerticals((prev) =>
-                    selected ? prev.filter((x) => x !== v) : [...prev, v]
-                  )}
-                  className={`text-[10px] px-2 py-1 rounded-md border transition-colors ${
-                    selected
-                      ? "bg-primary/20 text-primary border-primary/30"
-                      : "bg-muted/30 text-muted-foreground border-border hover:bg-muted/50"
-                  }`}
-                >
-                  {selected ? "✓ " : ""}{v}
-                </button>
-              );
-            })}
-            <button
-              type="button"
-              onClick={() => setQuickTestVerticals(
-                quickTestVerticals.length === QUICK_TEST_VERTICALS.length ? [] : [...QUICK_TEST_VERTICALS]
-              )}
-              className="text-[10px] px-2 py-1 rounded-md border border-dashed border-border text-muted-foreground hover:text-foreground"
-            >
-              {quickTestVerticals.length === QUICK_TEST_VERTICALS.length ? "Clear All" : "Select All"}
-            </button>
-          </div>
-        </div>
-
-        {/* Outreach channels */}
-        <div className="flex items-start gap-2">
-          <span className="text-xs text-muted-foreground w-12 pt-1 shrink-0">Outreach:</span>
-          <div className="flex flex-wrap gap-1.5">
-            {(["email", "meta", "linkedin", "reddit", "meta_groups", "linkedin_groups", "youtube", "twitter", "discord", "quora", "nextdoor"] as const).map((ch) => {
-              const labels: Record<string, string> = { email: "Email", meta: "Facebook DMs", linkedin: "LinkedIn", reddit: "Reddit", meta_groups: "FB Groups", linkedin_groups: "LI Groups", youtube: "YouTube", twitter: "Twitter/X", discord: "Discord", quora: "Quora", nextdoor: "Nextdoor" };
-              const selected = quickTestOutreach.includes(ch);
-              return (
-                <button
-                  key={ch}
-                  type="button"
-                  onClick={() => setQuickTestOutreach((prev: string[]) =>
-                    selected ? prev.filter((x: string) => x !== ch) : [...prev, ch]
-                  )}
-                  className={`text-[10px] px-2 py-1 rounded-md border transition-colors ${
-                    selected
-                      ? "bg-primary/20 text-primary border-primary/30"
-                      : "bg-muted/30 text-muted-foreground border-border hover:bg-muted/50"
-                  }`}
-                >
-                  {selected ? "✓ " : ""}{labels[ch] || ch}
-                </button>
-              );
-            })}
-            {(() => {
-              const ALL_CHANNELS = ["email", "meta", "linkedin", "reddit", "meta_groups", "linkedin_groups", "youtube", "twitter", "discord", "quora", "nextdoor"];
-              return (
-                <button
-                  type="button"
-                  onClick={() => setQuickTestOutreach(
-                    quickTestOutreach.length === ALL_CHANNELS.length ? ["email"] : [...ALL_CHANNELS]
-                  )}
-                  className="text-[10px] px-2 py-1 rounded-md border border-dashed border-border text-muted-foreground hover:text-foreground"
-                >
-                  {quickTestOutreach.length === ALL_CHANNELS.length ? "Email Only" : "Select All"}
-                </button>
-              );
-            })()}
-          </div>
-        </div>
-
-        {/* Run button */}
-        <div className="flex justify-end">
-          <Button
-            size="sm"
-            className="gap-1.5"
-            disabled={quickTestRunning || !org?._id || (!currentUser?._id && !fallbackUserId)}
-            onClick={async () => {
-              if (!org?._id) return;
-              const creatorId = currentUser?._id || fallbackUserId;
-              if (!creatorId) return;
-
-              setQuickTestRunning(true);
-              try {
-                // 1. Setup lead gen hierarchy
-                await setupLeadGenHierarchy({
-                  organizationId: org._id,
-                  modelId: "anthropic/claude-haiku-4.5",
-                  agentModels: Object.fromEntries(AGENT_ROLES.map((r) => [r.key, r.recommendedModel])),
-                });
-
-                // 2. Reinitialize city campaigns for selected state
-                await reinitializeCities({
-                  organizationId: org._id,
-                  states: [quickTestState],
-                });
-
-                // 3. Create the scheduled task
-                const taskId = await createTask({
-                  organizationId: org._id,
-                  createdBy: creatorId,
-                  name: `Test Run - ${quickTestCount} leads - ${quickTestState}`,
-                  prompt: `Run lead generation campaign: scrape ${quickTestCount} businesses across ${quickTestVerticals.length} verticals in ${quickTestState}, enrich data, and run outreach on channels: ${quickTestOutreach.join(", ")}.`,
-                  agentConfig: { agentType: "lead_gen_agent" },
-                  schedule: { type: "once", runAt: Date.now() },
-                  campaignConfig: {
-                    verticals: quickTestVerticals,
-                    states: [quickTestState],
-                    cityCount: 100,
-                    dailyResults: quickTestCount,
-                    dataFields: QUICK_TEST_DATA_FIELDS,
-                    outreachChannels: quickTestOutreach,
-                    agentModels: Object.fromEntries(AGENT_ROLES.map((r) => [r.key, r.recommendedModel])),
-                    channelConfig: {
-                      email: { enabled: quickTestOutreach.includes("email"), dailyLimit: 5, selectedAccounts: [] },
-                      meta: { enabled: quickTestOutreach.includes("meta"), dailyLimit: 2, selectedAccounts: [] },
-                      linkedin: { enabled: quickTestOutreach.includes("linkedin"), dailyLimit: 2, selectedAccounts: [] },
-                    },
-                    socialPresence: {
-                      ...DEFAULT_CAMPAIGN_CONFIG.socialPresence,
-                      postToReddit: quickTestOutreach.includes("reddit"),
-                      redditPostCount: 2,
-                      redditPostFrequency: "daily" as const,
-                      postToMetaGroups: quickTestOutreach.includes("meta_groups"),
-                      metaPostCount: 2,
-                      metaPostFrequency: "daily" as const,
-                      postToLinkedinGroups: quickTestOutreach.includes("linkedin_groups"),
-                      linkedinPostCount: 2,
-                      linkedinPostFrequency: "daily" as const,
-                      postToYoutube: quickTestOutreach.includes("youtube"),
-                      youtubePostCount: 2,
-                      youtubePostFrequency: "daily" as const,
-                      postToTwitter: quickTestOutreach.includes("twitter"),
-                      twitterPostCount: 2,
-                      twitterPostFrequency: "daily" as const,
-                      postToDiscord: quickTestOutreach.includes("discord"),
-                      discordPostCount: 2,
-                      discordPostFrequency: "daily" as const,
-                      findQuora: quickTestOutreach.includes("quora"),
-                      quoraPostCount: 2,
-                      quoraPostFrequency: "daily" as const,
-                      findNextdoor: quickTestOutreach.includes("nextdoor"),
-                      nextdoorPostCount: 2,
-                      nextdoorPostFrequency: "daily" as const,
-                    },
-                  },
-                });
-
-                // 4. Immediately run the task
-                if (taskId) {
-                  await runNow({ taskId });
-                }
-              } catch (err) {
-                console.error("[QuickTest] Error:", err);
-              } finally {
-                setQuickTestRunning(false);
-              }
-            }}
-          >
-            {quickTestRunning ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Play className="h-3.5 w-3.5" />
-            )}
-            Run Test
-          </Button>
-        </div>
-      </div>
-
       {showForm && (
         <TaskForm
           teamAgents={teamAgents || []}
@@ -1808,6 +1582,7 @@ export default function ScheduledPage() {
                 onRunNow={(id) => runNow({ taskId: id })}
                 onEdit={(t) => setEditingTask(t)}
                 organizationId={org?._id}
+                providerKeys={org?.providerKeys as Record<string, any> | undefined}
               />
             );
           })}
@@ -2928,11 +2703,10 @@ function TaskForm({
                 Email Template (optional)
               </label>
               <textarea
-                value={campaignConfig.emailTemplate || ""}
+                value={campaignConfig.emailTemplate ?? DEFAULT_EMAIL_TEMPLATE}
                 onChange={(e) =>
                   setCampaignConfig((prev) => ({ ...prev, emailTemplate: e.target.value }))
                 }
-                placeholder={`Hi {{ownerName}},\n\nI came across {{businessName}} and was impressed by your {{rating}}-star rating. One of your customers said: "{{bestReview}}"\n\nI help {{vertical}} businesses in {{city}} get more customers through modern websites and local SEO.\n\nWould you be open to a quick chat this week?\n\nBest,\n[Your Name]`}
                 rows={8}
                 className="w-full rounded-md border border-border bg-muted/20 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-primary/50 resize-y"
               />
@@ -3140,6 +2914,7 @@ function AgentModelSelector({
   agentModels: Record<string, string>;
   onChange: (models: Record<string, string>) => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const setModel = (key: string, modelId: string) => {
     onChange({ ...agentModels, [key]: modelId });
   };
@@ -3163,19 +2938,29 @@ function AgentModelSelector({
           <span className="font-medium text-blue-300">OpenAI OAuth available</span> — GPT-4o, GPT-4o Mini, and GPT-4.1 can be used with your connected ChatGPT / OpenAI account via OAuth in Settings. API pricing applies (not the $20/mo ChatGPT Plus subscription).
         </p>
       </div>
-      <div className="flex items-center justify-between">
-        <span className="text-[10px] text-muted-foreground">
-          Est. agent LLM cost: <span className="text-foreground font-medium">~${totalDailyCost.toFixed(2)}/day</span>
-        </span>
+      <div className="flex items-center justify-between gap-2">
         <button
           type="button"
-          onClick={resetAll}
-          className="text-[10px] text-primary hover:underline"
+          onClick={() => setExpanded((v) => !v)}
+          className="flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-foreground"
         >
-          Reset to recommended
+          <ChevronDown className={`h-3 w-3 transition-transform ${expanded ? "" : "-rotate-90"}`} />
+          <span>Agent models</span>
+          <span className="text-muted-foreground/70">
+            · Est. <span className="text-foreground font-medium">~${totalDailyCost.toFixed(2)}/day</span>
+          </span>
         </button>
+        {expanded && (
+          <button
+            type="button"
+            onClick={resetAll}
+            className="text-[10px] text-primary hover:underline"
+          >
+            Reset to recommended
+          </button>
+        )}
       </div>
-      <div className="space-y-1.5">
+      <div className={`space-y-1.5 ${expanded ? "" : "hidden"}`}>
         {AGENT_ROLES.map((role) => {
           const selectedId = agentModels[role.key] ?? role.recommendedModel;
           const isRecommended = selectedId === role.recommendedModel;
@@ -3340,6 +3125,7 @@ function TaskCard({
   onRunNow,
   onEdit,
   organizationId,
+  providerKeys,
 }: {
   task: {
     _id: Id<"scheduledTasks">;
@@ -3374,6 +3160,7 @@ function TaskCard({
   onRunNow: (id: Id<"scheduledTasks">) => void;
   onEdit: (task: any) => void;
   organizationId?: string;
+  providerKeys?: Record<string, any>;
 }) {
   const [showHistory, setShowHistory] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -3622,19 +3409,37 @@ function TaskCard({
         const agentType = task.agentConfig?.agentType;
         const requiredApis = agentType ? AGENT_REQUIRED_APIS[agentType] : null;
         if (!requiredApis) return null;
+        const missing = requiredApis.filter((a) => !isProviderConnected(providerKeys, a.key));
+        const missingRequired = missing.filter((a) => a.required);
+        if (missing.length === 0) {
+          return (
+            <div className="rounded-lg border border-emerald-600/30 bg-emerald-50 px-3 py-2 flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-xs font-medium text-emerald-800">
+                <Check className="h-3.5 w-3.5" />
+                All API keys connected
+              </div>
+              <Link href="/settings#task-api-keys" className="flex items-center gap-1 text-xs text-emerald-700 hover:text-emerald-900 underline underline-offset-2">
+                Settings <ExternalLink className="h-3 w-3" />
+              </Link>
+            </div>
+          );
+        }
+        const borderColor = missingRequired.length > 0 ? "border-amber-600/30" : "border-border";
+        const bgColor = missingRequired.length > 0 ? "bg-amber-50" : "bg-muted/20";
+        const headerColor = missingRequired.length > 0 ? "text-amber-800" : "text-muted-foreground";
         return (
-          <div className="rounded-lg border border-amber-600/30 bg-amber-50 px-3 py-2.5 space-y-2">
+          <div className={`rounded-lg border ${borderColor} ${bgColor} px-3 py-2.5 space-y-2`}>
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5 text-xs font-medium text-amber-800">
+              <div className={`flex items-center gap-1.5 text-xs font-medium ${headerColor}`}>
                 <AlertTriangle className="h-3.5 w-3.5" />
-                Required API Keys
+                {missingRequired.length > 0 ? "Missing Required API Keys" : "Optional API Keys"}
               </div>
               <Link href="/settings#task-api-keys" className="flex items-center gap-1 text-xs text-amber-700 hover:text-amber-900 underline underline-offset-2">
                 Settings <ExternalLink className="h-3 w-3" />
               </Link>
             </div>
             <div className="flex flex-wrap gap-3">
-              {requiredApis.map((api) => (
+              {missing.map((api) => (
                 <button
                   key={api.key}
                   type="button"

@@ -5,6 +5,7 @@ import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { validateEmailContent } from "./spam-filter";
 import { composeEmail } from "./email-compose";
+import { renderEmailTemplate } from "./email-merge";
 
 // ── Get Email Ready Businesses ────────────────────────────────────────
 
@@ -82,6 +83,7 @@ export function createDirectEmailTool(config: {
     }),
     execute: async ({ businessId, recipientEmail, recipientName, businessName, subject, body }) => {
       try {
+        ({ subject, body } = await renderEmailTemplate(convex, businessId, subject, body, { recipientName, businessName }));
         // Check warmup-aware daily send limit
         let effectiveLimit = parseInt(process.env.RESEND_DAILY_LIMIT ?? "50", 10);
         let warmupInfo = "";
