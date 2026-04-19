@@ -25,7 +25,7 @@ export async function authorizeOrgMember(
     .first();
 
   if (!user) {
-    throw new Error("Forbidden: not a member of this organization");
+    throw new Error(`Forbidden: not a member of this organization (jwtSub=${identity.subject} orgId=${organizationId})`);
   }
 
   return user;

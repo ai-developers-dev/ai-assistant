@@ -6,6 +6,7 @@ import type { Id } from "../../../convex/_generated/dataModel";
 import nodemailer from "nodemailer";
 import { validateEmailContent } from "./spam-filter";
 import { composeEmail } from "./email-compose";
+import { renderEmailTemplate } from "./email-merge";
 
 // ── Send Direct Email via Gmail SMTP ──────────────────────────────────
 
@@ -39,6 +40,7 @@ export function createGmailEmailTool(config: {
     }),
     execute: async ({ businessId, recipientEmail, recipientName, businessName, subject, body }) => {
       try {
+        ({ subject, body } = await renderEmailTemplate(convex, businessId, subject, body, { recipientName, businessName }));
         // Check warmup-aware daily send limit
         let effectiveLimit = parseInt(process.env.GMAIL_DAILY_LIMIT ?? "50", 10);
         try {
