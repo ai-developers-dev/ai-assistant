@@ -11,6 +11,8 @@ import {
   tokenOf,
 } from "../_lib/shared";
 import type { Id } from "../../../../../convex/_generated/dataModel";
+import { encrypt, decrypt } from "@/lib/credentials/crypto";
+import { api } from "../../../../../convex/_generated/api";
 
 export const maxDuration = 30;
 
@@ -41,11 +43,47 @@ export async function POST(req: NextRequest) {
   }
 
   const convex = getConvex();
-  let credSummary: Record<string, any> = {};
+
+  // Self-test: encrypt + decrypt a known plaintext using this org's ID.
+  // Proves the master key works independently of any stored blobs.
+  let roundtripOk = false;
+  let roundtripError: string | null = null;
+  try {
+    const sample = "hello-world-" + Math.random().toString(36).slice(2);
+    const enc = encrypt(sample, organizationId as unknown as string);
+    const dec = decrypt(enc, organizationId as unknown as string);
+    roundtripOk = dec === sample;
+  } catch (err: any) {
+    roundtripError = err?.message || String(err);
+  }
+
+  // Try to decrypt ONE stored blob (outscraper) directly so we see the real error
+  let directDecryptError: string | null = null;
+  try {
+    const org: any = await convex.query(api.organizations.getById, {
+      id: organizationId,
+    });
+    const pk: any = org?.providerKeys ?? {};
+    const enc = pk.outscraper?.encryptedApiKey;
+    if (enc) {
+      decrypt(enc, organizationId as unknown as string);
+    } else {
+      directDecryptError = "(no outscraper.encryptedApiKey in db)";
+    }
+  } catch (err: any) {
+    directDecryptError = err?.message || String(err);
+  }
+
+  let credSummary: Record<string, any> = {
+    roundtripOk,
+    roundtripError,
+    directDecryptError,
+  };
   let orgLoadError: string | null = null;
   try {
     const { org, credentials } = await loadOrgContext(convex, organizationId);
     credSummary = {
+      ...credSummary,
       orgName: org.name,
       decryptedProviders: Object.keys(credentials),
       outscraper: mask(tokenOf(credentials.outscraper)),
