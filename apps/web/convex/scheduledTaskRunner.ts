@@ -92,6 +92,17 @@ export const executeTask = internalAction({
       return;
     }
 
+    // Lead-gen tasks use the new deterministic pipeline instead of the
+    // LLM-orchestrator /api/chat path. See apps/web/convex/leadGenPipeline.ts.
+    if (task.agentConfig?.agentType === "lead_gen_agent") {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.leadGenPipeline.start,
+        { taskId: args.taskId }
+      );
+      return;
+    }
+
     const startTime = Date.now();
 
     try {

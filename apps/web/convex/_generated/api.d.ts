@@ -25,6 +25,7 @@ import type * as embeddings from "../embeddings.js";
 import type * as files from "../files.js";
 import type * as health from "../health.js";
 import type * as http from "../http.js";
+import type * as leadGenPipeline from "../leadGenPipeline.js";
 import type * as leadGenPosts from "../leadGenPosts.js";
 import type * as leads from "../leads.js";
 import type * as lib_auth from "../lib/auth.js";
@@ -70,6 +71,7 @@ declare const fullApi: ApiFromModules<{
   files: typeof files;
   health: typeof health;
   http: typeof http;
+  leadGenPipeline: typeof leadGenPipeline;
   leadGenPosts: typeof leadGenPosts;
   leads: typeof leads;
   "lib/auth": typeof lib_auth;
