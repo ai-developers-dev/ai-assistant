@@ -7,6 +7,7 @@ import {
   internalAction,
 } from "./_generated/server";
 import { internal } from "./_generated/api";
+import { authorizeOrgMember } from "./lib/auth";
 
 const DAILY_RESULTS_TARGET_OPTIONS = [25, 50, 100, 200, 250, 300, 400, 500, 600, 700, 800, 900, 1000] as const;
 const DAILY_RESULTS_TARGET_SET = new Set<number>(DAILY_RESULTS_TARGET_OPTIONS);
@@ -949,6 +950,53 @@ export const getExecutionHistory = query({
       .withIndex("by_taskId", (q) => q.eq("taskId", args.taskId))
       .order("desc")
       .take(args.limit ?? 10);
+  },
+});
+
+// Return the single most-recent execution for a task — for the error banner on the card
+export const getLatestExecution = query({
+  args: { taskId: v.id("scheduledTasks") },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("taskExecutionResults")
+      .withIndex("by_taskId", (q) => q.eq("taskId", args.taskId))
+      .order("desc")
+      .first();
+  },
+});
+
+// Scheduler health across the whole org: success/fail counts over last 24h, plus
+// the timestamp of the last successful tick so the UI can flag a broken scheduler.
+export const getSchedulerHealth = query({
+  args: { organizationId: v.id("organizations") },
+  handler: async (ctx, args) => {
+    await authorizeOrgMember(ctx, args.organizationId);
+    const since = Date.now() - 24 * 60 * 60 * 1000;
+    const executions = await ctx.db
+      .query("taskExecutionResults")
+      .withIndex("by_organizationId", (q) =>
+        q.eq("organizationId", args.organizationId)
+      )
+      .order("desc")
+      .take(100);
+    const recent = executions.filter((e) => e.executedAt >= since);
+    const lastSuccess = executions.find((e) => e.status === "success");
+    const lastFailure = executions.find((e) => e.status === "failed");
+    // Consecutive failures — count from most recent until we hit a success
+    let consecutiveFailures = 0;
+    for (const e of executions) {
+      if (e.status === "failed") consecutiveFailures++;
+      else break;
+    }
+    return {
+      totalLast24h: recent.length,
+      successLast24h: recent.filter((e) => e.status === "success").length,
+      failLast24h: recent.filter((e) => e.status === "failed").length,
+      lastSuccessAt: lastSuccess?.executedAt ?? null,
+      lastFailureAt: lastFailure?.executedAt ?? null,
+      lastFailureError: lastFailure?.error?.slice(0, 500) ?? null,
+      consecutiveFailures,
+    };
   },
 });
 

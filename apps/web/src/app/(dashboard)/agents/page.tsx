@@ -104,6 +104,12 @@ export default function AgentsPage() {
     team?._id ? { agentTeamId: team._id } : "skip"
   );
 
+  // Agents + their last activity (from agentDecisionLog). Powers the activity snapshot.
+  const agentsWithActivity = useQuery(
+    api.teamAgents.listByOrganizationWithActivity,
+    org?._id ? { organizationId: org._id } : "skip"
+  );
+
   const createProject = useMutation(api.projects.create);
 
   // Fetch scheduled tasks + provider statuses for agent card metadata
@@ -469,6 +475,76 @@ export default function AgentsPage() {
           </>
         )}
       </div>
+
+      {/* Activity snapshot — last seen per agent from agentDecisionLog */}
+      {hasTeam && agentsWithActivity && agentsWithActivity.length > 0 && (
+        <div className="w-full max-w-3xl mt-6">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+            <Clock className="h-3.5 w-3.5" />
+            Activity Snapshot
+          </div>
+          <div className="border border-border rounded-lg overflow-hidden">
+            <table className="w-full text-xs">
+              <thead className="bg-muted/50 text-muted-foreground">
+                <tr>
+                  <th className="text-left px-3 py-1.5 font-medium">Agent</th>
+                  <th className="text-left px-3 py-1.5 font-medium">Last seen</th>
+                  <th className="text-left px-3 py-1.5 font-medium">Last action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {agentsWithActivity
+                  .filter((a) => !a.isHidden)
+                  .map((a) => {
+                    const ageMs = a.lastActivity
+                      ? Date.now() - a.lastActivity.createdAt
+                      : Infinity;
+                    const fresh = ageMs < 10 * 60 * 1000;
+                    const recent = ageMs < 24 * 60 * 60 * 1000;
+                    return (
+                      <tr key={a._id} className="border-t border-border">
+                        <td className="px-3 py-1.5 font-medium">{a.name}</td>
+                        <td className="px-3 py-1.5">
+                          {a.lastActivity ? (
+                            <span
+                              className={`inline-flex items-center gap-1 ${
+                                fresh
+                                  ? "text-emerald-700"
+                                  : recent
+                                  ? "text-foreground"
+                                  : "text-muted-foreground"
+                              }`}
+                            >
+                              <span
+                                className={`h-1.5 w-1.5 rounded-full ${
+                                  fresh
+                                    ? "bg-emerald-500 animate-pulse"
+                                    : recent
+                                    ? "bg-foreground/40"
+                                    : "bg-muted-foreground/40"
+                                }`}
+                              />
+                              {new Date(a.lastActivity.createdAt).toLocaleString()}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground italic">never</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-1.5 text-muted-foreground truncate max-w-[300px]">
+                          {a.lastActivity
+                            ? `${a.lastActivity.decision}${
+                                a.lastActivity.reason ? ` — ${a.lastActivity.reason}` : ""
+                              }`
+                            : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Swarm Visualization */}
       {hasTeam && subAgents && subAgents.filter((a) => !a.isHidden).length > 0 && (

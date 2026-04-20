@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation } from "convex/react";
+import { toast } from "sonner";
 import { useUser } from "@clerk/nextjs";
 import { useEffectiveOrg } from "@/hooks/use-effective-org";
 import { api } from "../../../../convex/_generated/api";
@@ -1524,6 +1525,9 @@ export default function ScheduledPage() {
         </Button>
       </div>
 
+      {/* Scheduler health */}
+      {org?._id && <SchedulerHealthChip organizationId={org._id} />}
+
       {showForm && (
         <TaskForm
           teamAgents={teamAgents || []}
@@ -1579,7 +1583,14 @@ export default function ScheduledPage() {
                   updateTask({ taskId: id, status })
                 }
                 onDelete={(id) => deleteTask({ taskId: id })}
-                onRunNow={(id) => runNow({ taskId: id })}
+                onRunNow={async (id) => {
+                  try {
+                    await runNow({ taskId: id });
+                    toast.success("Run dispatched — watch the Last Run banner for results");
+                  } catch (err: any) {
+                    toast.error(err?.message ?? "Failed to start run");
+                  }
+                }}
                 onEdit={(t) => setEditingTask(t)}
                 organizationId={org?._id}
                 providerKeys={org?.providerKeys as Record<string, any> | undefined}
@@ -3157,7 +3168,7 @@ function TaskCard({
     status: "active" | "paused"
   ) => void;
   onDelete: (id: Id<"scheduledTasks">) => void;
-  onRunNow: (id: Id<"scheduledTasks">) => void;
+  onRunNow: (id: Id<"scheduledTasks">) => void | Promise<void>;
   onEdit: (task: any) => void;
   organizationId?: string;
   providerKeys?: Record<string, any>;
@@ -3166,6 +3177,12 @@ function TaskCard({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testReport, setTestReport] = useState<TestReport | null>(null);
+  const [showFullError, setShowFullError] = useState(false);
+
+  const latestExecution = useQuery(
+    api.scheduledTaskRunner.getLatestExecution,
+    { taskId: task._id }
+  );
 
   const handleTest = async () => {
     if (!organizationId) return;
@@ -3403,6 +3420,56 @@ function TaskCard({
           History
         </Button>
       </div>
+
+      {/* Last execution status — shown prominently so failures aren't hidden behind a toggle */}
+      {latestExecution && (
+        <div
+          className={`rounded-lg border px-3 py-2 space-y-1.5 ${
+            latestExecution.status === "failed"
+              ? "border-red-500/40 bg-red-500/5"
+              : "border-emerald-500/30 bg-emerald-500/5"
+          }`}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 text-xs font-medium">
+              {latestExecution.status === "failed" ? (
+                <>
+                  <AlertTriangle className="h-3.5 w-3.5 text-red-600" />
+                  <span className="text-red-700">Last run failed</span>
+                </>
+              ) : (
+                <>
+                  <Check className="h-3.5 w-3.5 text-emerald-600" />
+                  <span className="text-emerald-700">Last run succeeded</span>
+                </>
+              )}
+              <span className="text-muted-foreground font-normal">
+                · {formatRelativeTime(latestExecution.executedAt)}
+                {latestExecution.durationMs != null &&
+                  ` · ${formatDuration(latestExecution.durationMs)}`}
+              </span>
+            </div>
+            {latestExecution.status === "failed" && latestExecution.error && (
+              <button
+                type="button"
+                onClick={() => setShowFullError((v) => !v)}
+                className="text-[11px] text-red-700 hover:underline"
+              >
+                {showFullError ? "Hide" : "Show"} details
+              </button>
+            )}
+          </div>
+          {latestExecution.status === "failed" && latestExecution.error && (
+            <pre
+              className={`text-[10px] text-red-800/90 font-mono bg-red-500/5 rounded border border-red-500/20 p-2 whitespace-pre-wrap break-words ${
+                showFullError ? "" : "max-h-12 overflow-hidden"
+              }`}
+            >
+              {latestExecution.error}
+            </pre>
+          )}
+        </div>
+      )}
 
       {/* Required APIs banner for home services agents */}
       {(() => {
@@ -3668,6 +3735,69 @@ function TaskCard({
   );
 }
 
+// ── Scheduler Health Chip ─────────────────────────────────────────────
+
+function SchedulerHealthChip({ organizationId }: { organizationId: Id<"organizations"> }) {
+  const health = useQuery(api.scheduledTaskRunner.getSchedulerHealth, { organizationId });
+  if (!health) return null;
+  const broken = health.consecutiveFailures >= 3;
+  const stale =
+    !broken &&
+    health.lastSuccessAt != null &&
+    Date.now() - health.lastSuccessAt > 6 * 60 * 60 * 1000 &&
+    health.totalLast24h > 0;
+  const healthy = !broken && !stale;
+  const total = health.successLast24h + health.failLast24h;
+  return (
+    <div
+      className={`rounded-lg border px-3 py-2 flex items-center justify-between gap-3 ${
+        broken
+          ? "border-red-500/40 bg-red-500/5"
+          : stale
+          ? "border-amber-500/40 bg-amber-500/5"
+          : "border-border bg-muted/20"
+      }`}
+    >
+      <div className="flex items-center gap-2 text-xs">
+        {broken ? (
+          <>
+            <AlertTriangle className="h-3.5 w-3.5 text-red-600" />
+            <span className="font-medium text-red-700">
+              Scheduler broken — {health.consecutiveFailures} consecutive failures
+            </span>
+          </>
+        ) : stale ? (
+          <>
+            <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
+            <span className="font-medium text-amber-700">
+              No successful run in 6+ hours
+            </span>
+          </>
+        ) : healthy && total > 0 ? (
+          <>
+            <Check className="h-3.5 w-3.5 text-emerald-600" />
+            <span className="font-medium text-emerald-700">Scheduler healthy</span>
+          </>
+        ) : (
+          <>
+            <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-muted-foreground">No recent activity</span>
+          </>
+        )}
+        <span className="text-muted-foreground">
+          · {health.successLast24h}✓ / {health.failLast24h}✗ last 24h
+          {health.lastSuccessAt && ` · last success ${formatRelativeTime(health.lastSuccessAt)}`}
+        </span>
+      </div>
+      {broken && health.lastFailureError && (
+        <span className="text-[10px] text-red-700 font-mono truncate max-w-[40%]" title={health.lastFailureError}>
+          {health.lastFailureError.slice(0, 120)}
+        </span>
+      )}
+    </div>
+  );
+}
+
 // ── Execution History ─────────────────────────────────────────────────
 
 function ExecutionHistory({ taskId }: { taskId: Id<"scheduledTasks"> }) {
@@ -3705,37 +3835,70 @@ function ExecutionHistory({ taskId }: { taskId: Id<"scheduledTasks"> }) {
         </thead>
         <tbody>
           {history.map((exec) => (
-            <tr key={exec._id} className="border-t border-border">
-              <td className="px-3 py-1.5 text-muted-foreground">
-                {new Date(exec.executedAt).toLocaleString()}
-              </td>
-              <td className="px-3 py-1.5">
-                <Badge
-                  variant="outline"
-                  className={`text-[10px] ${
-                    exec.status === "success"
-                      ? "border-green-500/30 text-green-700"
-                      : "border-red-500/30 text-red-600"
-                  }`}
-                >
-                  {exec.status === "success" ? (
-                    <Check className="h-2.5 w-2.5 mr-0.5" />
-                  ) : (
-                    <X className="h-2.5 w-2.5 mr-0.5" />
-                  )}
-                  {exec.status}
-                </Badge>
-              </td>
-              <td className="px-3 py-1.5 text-muted-foreground tabular-nums">
-                {formatDuration(exec.durationMs)}
-              </td>
-              <td className="px-3 py-1.5 text-muted-foreground max-w-[200px] truncate">
-                {exec.error || exec.result?.slice(0, 80) || "—"}
-              </td>
-            </tr>
+            <ExecutionRow key={exec._id} exec={exec} />
           ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+function ExecutionRow({
+  exec,
+}: {
+  exec: {
+    _id: Id<"taskExecutionResults">;
+    executedAt: number;
+    status: "success" | "failed";
+    durationMs?: number;
+    result?: string;
+    error?: string;
+  };
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const detail = exec.error || exec.result || "";
+  return (
+    <>
+      <tr
+        className="border-t border-border cursor-pointer hover:bg-muted/20"
+        onClick={() => detail && setExpanded((v) => !v)}
+      >
+        <td className="px-3 py-1.5 text-muted-foreground">
+          {new Date(exec.executedAt).toLocaleString()}
+        </td>
+        <td className="px-3 py-1.5">
+          <Badge
+            variant="outline"
+            className={`text-[10px] ${
+              exec.status === "success"
+                ? "border-green-500/30 text-green-700"
+                : "border-red-500/30 text-red-600"
+            }`}
+          >
+            {exec.status === "success" ? (
+              <Check className="h-2.5 w-2.5 mr-0.5" />
+            ) : (
+              <X className="h-2.5 w-2.5 mr-0.5" />
+            )}
+            {exec.status}
+          </Badge>
+        </td>
+        <td className="px-3 py-1.5 text-muted-foreground tabular-nums">
+          {formatDuration(exec.durationMs)}
+        </td>
+        <td className="px-3 py-1.5 text-muted-foreground max-w-[200px] truncate">
+          {detail ? detail.slice(0, 80) : "—"}
+        </td>
+      </tr>
+      {expanded && detail && (
+        <tr className="border-t border-border bg-muted/10">
+          <td colSpan={4} className="px-3 py-2">
+            <pre className="text-[10px] font-mono whitespace-pre-wrap break-words max-h-48 overflow-auto text-foreground/80">
+              {detail}
+            </pre>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }

@@ -31,6 +31,44 @@ export const listByOrganization = query({
   },
 });
 
+// Team agents + their last recorded activity (from agentDecisionLog).
+// Used by the Agents page to show "last seen 2m ago" per agent instead of a static "idle".
+export const listByOrganizationWithActivity = query({
+  args: { organizationId: v.id("organizations") },
+  handler: async (ctx, args) => {
+    const agents = await ctx.db
+      .query("teamAgents")
+      .withIndex("by_organizationId", (q) =>
+        q.eq("organizationId", args.organizationId)
+      )
+      .collect();
+    // Pull last 200 decisions once, then index by agentName for O(n) lookup per agent.
+    const decisions = await ctx.db
+      .query("agentDecisionLog")
+      .withIndex("by_organizationId", (q) =>
+        q.eq("organizationId", args.organizationId)
+      )
+      .order("desc")
+      .take(200);
+    const lastByName = new Map<string, { createdAt: number; decision: string; reason?: string }>();
+    for (const d of decisions) {
+      if (!lastByName.has(d.agentName)) {
+        lastByName.set(d.agentName, {
+          createdAt: d.createdAt,
+          decision: d.decision,
+          reason: d.reason,
+        });
+      }
+    }
+    return agents
+      .sort((a, b) => a.order - b.order)
+      .map((a) => ({
+        ...a,
+        lastActivity: lastByName.get(a.name) ?? null,
+      }));
+  },
+});
+
 // ── Mutations ────────────────────────────────────────────────────────
 
 export const create = mutation({
