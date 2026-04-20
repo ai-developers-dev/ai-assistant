@@ -82,16 +82,19 @@ function resolveProvider(modelId: string, credentials?: DecryptedProviderKeys): 
     }
   }
 
-  // Try env var API keys as fallback before OpenRouter
-  const envKeys: Record<string, { envVar: string; sdk: string; baseUrl?: string }> = {
-    openai: { envVar: "OPENAI_API_KEY", sdk: "openai" },
-    anthropic: { envVar: "ANTHROPIC_API_KEY", sdk: "anthropic" },
-    google: { envVar: "GOOGLE_API_KEY", sdk: "google" },
+  // Try env var API keys as fallback before OpenRouter.
+  // Accept common variants so users don't get locked out by naming confusion
+  // (e.g. the Google SDK's own convention is GOOGLE_GENERATIVE_AI_API_KEY).
+  const envKeys: Record<string, { envVars: string[]; sdk: string; baseUrl?: string }> = {
+    openai: { envVars: ["OPENAI_API_KEY"], sdk: "openai" },
+    anthropic: { envVars: ["ANTHROPIC_API_KEY"], sdk: "anthropic" },
+    google: { envVars: ["GOOGLE_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY"], sdk: "google" },
   };
 
   if (modelConfig?.provider && envKeys[modelConfig.provider]) {
-    const { envVar, sdk } = envKeys[modelConfig.provider];
-    const envKey = process.env[envVar];
+    const { envVars, sdk } = envKeys[modelConfig.provider];
+    const envVar = envVars.find((name) => process.env[name]);
+    const envKey = envVar ? process.env[envVar] : undefined;
     if (envKey && modelConfig.directModelId) {
       console.log(`[routing] Using ${envVar} env var for ${modelId}`);
       switch (sdk) {
