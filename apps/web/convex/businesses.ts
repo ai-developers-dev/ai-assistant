@@ -49,6 +49,39 @@ export const list = query({
   },
 });
 
+// ── Lenient list for pipeline internal callers ─────────────────────
+// Used by /api/lead-gen/* endpoints which authenticate via scheduler
+// secret rather than Clerk. Bypasses strict auth — safe because the
+// route layer already verified the secret.
+export const listForPipeline = query({
+  args: {
+    organizationId: v.id("organizations"),
+    status: v.optional(v.union(
+      v.literal("new"),
+      v.literal("enriching"),
+      v.literal("ready"),
+      v.literal("all_sent")
+    )),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, { organizationId, status, limit }) => {
+    await authorizeOrgMemberLenient(ctx, organizationId);
+    let q = status
+      ? ctx.db
+          .query("businesses")
+          .withIndex("by_organizationId_status", (x) =>
+            x.eq("organizationId", organizationId).eq("status", status)
+          )
+      : ctx.db
+          .query("businesses")
+          .withIndex("by_organizationId", (x) =>
+            x.eq("organizationId", organizationId)
+          );
+    const rows = await q.collect();
+    return limit ? rows.slice(0, limit) : rows;
+  },
+});
+
 // ── Get by ID ────────────────────────────────────────────────────────
 
 export const getById = query({
@@ -652,6 +685,34 @@ export const getStats = query({
       emailReplied: all.filter((b) => !!b.outreachStatus?.emailRepliedAt).length,
       metaReplied: all.filter((b) => !!b.outreachStatus?.metaRepliedAt).length,
       linkedinReplied: all.filter((b) => !!b.outreachStatus?.linkedinRepliedAt).length,
+    };
+  },
+});
+
+// Lenient version of getStats for /api/lead-gen/report. Safe because
+// the route verifies the scheduler secret.
+export const getStatsForPipeline = query({
+  args: { organizationId: v.id("organizations") },
+  handler: async (ctx, { organizationId }) => {
+    await authorizeOrgMemberLenient(ctx, organizationId);
+    const all = await ctx.db
+      .query("businesses")
+      .withIndex("by_organizationId", (q) =>
+        q.eq("organizationId", organizationId)
+      )
+      .collect();
+    return {
+      total: all.length,
+      new: all.filter((b) => b.status === "new").length,
+      ready: all.filter((b) => b.status === "ready").length,
+      allSent: all.filter((b) => b.status === "all_sent").length,
+      withEmail: all.filter((b) => !!b.email).length,
+      emailSent: all.filter((b) => !!b.outreachStatus?.emailSentAt).length,
+      metaSent: all.filter((b) => !!b.outreachStatus?.metaSentAt).length,
+      linkedinSent: all.filter((b) => !!b.outreachStatus?.linkedinSentAt)
+        .length,
+      emailReplied: all.filter((b) => !!b.outreachStatus?.emailRepliedAt)
+        .length,
     };
   },
 });
