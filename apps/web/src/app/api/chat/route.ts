@@ -48,10 +48,12 @@ import { createLogDecisionTool } from "@/lib/tools/decision-log-tools";
 import { createGetBusinessesByStatusTool } from "@/lib/tools/business-query-tools";
 import { createGetCampaignSummaryTool } from "@/lib/tools/campaign-summary-tools";
 
-// Allow long-running streaming responses (10 min).
-// Claude Opus can think 2+ min then generate 3+ min for website HTML.
-// Vercel caps this at the plan's limit (Pro = 300s, Enterprise = 900s).
-export const maxDuration = 600;
+// Allow long-running streaming responses. Vercel caps:
+//   Hobby     = 300s
+//   Pro       = 800s
+//   Enterprise= 900s
+// Keep this <= 300 so the Hobby plan can build. Bump locally/in env when upgrading.
+export const maxDuration = 300;
 
 const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 
